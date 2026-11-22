@@ -1451,6 +1451,34 @@ body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;bac
 .btn-primary{box-shadow:inset 0 1px 0 rgba(255,255,255,.18)!important}
 .card{box-shadow:0 2px 10px rgba(0,0,0,.25)}
 [data-theme="light"] .card{box-shadow:0 2px 10px rgba(30,36,80,.08)}
+
+    /* ========== TOURNAMENT COMPLETION REVIEW ========== */
+    .tournament-review-details{margin:0 0 16px;border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--card)}
+    .tournament-review-summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;cursor:pointer;user-select:none}
+    .tournament-review-summary::-webkit-details-marker{display:none}
+    .tournament-review-summary>span:first-child{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .tournament-review-summary .tournament-review-credit{margin:2px 0 0}
+    .tournament-review-toggle{font-size:1.35rem;transition:transform .2s ease;color:var(--text-muted)}
+    .tournament-review-details:not([open]) .tournament-review-toggle{transform:rotate(-90deg)}
+    .tournament-review-details .tournament-review-box{border:0;border-top:1px solid var(--border);border-radius:0;margin:0}
+    .tournament-review-box{border:1px solid var(--border);border-radius:16px;background:linear-gradient(145deg,var(--card),var(--panel));padding:16px;margin:0 0 16px;overflow:hidden}
+    .tournament-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:5px}
+    .tournament-review-kicker{font-size:.65rem;font-weight:900;letter-spacing:.14em;color:var(--red-bright);text-transform:uppercase}
+    .tournament-review-title{font-family:var(--font-display);font-size:1.15rem;font-weight:850;letter-spacing:-.025em;margin:3px 0 0}
+    .tournament-review-credit{font-size:.68rem;color:var(--text-muted);margin:0 0 14px}
+    .tournament-review-player{display:grid;grid-template-columns:30px minmax(0,1fr);gap:10px;padding:11px 0;border-top:1px solid var(--border-subtle)}
+    .tournament-review-rank{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:var(--surface-2);font-size:.76rem;font-weight:900;color:var(--text-muted)}
+    .tournament-review-player-name{font-size:.9rem;font-weight:800;margin-bottom:3px}
+    .tournament-review-player-copy{font-size:.78rem;line-height:1.5;color:var(--text-muted)}
+    .tournament-highlights{margin-top:13px;padding-top:12px;border-top:1px solid var(--border)}
+    .tournament-highlights-title{font-size:.72rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+    .tournament-highlight{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:.78rem;border-bottom:1px solid var(--border-subtle)}
+    .tournament-highlight:last-child{border-bottom:0}
+    .tournament-highlight-label{color:var(--text-muted);flex:0 0 43%}
+    .tournament-highlight-value{text-align:right;font-weight:750;min-width:0}
+    .tournament-review-foot{font-size:.66rem;line-height:1.45;color:var(--text-dim);margin:12px 0 0}
+    @media(max-width:420px){.tournament-review-box{padding:13px}.tournament-highlight{font-size:.73rem}.tournament-highlight-label{flex-basis:40%}}
+
 </style>
 </head>
 <body>
@@ -1802,11 +1830,15 @@ body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;bac
         document.getElementById('modalTitle').textContent = title;
         document.getElementById('modalBody').innerHTML = bodyHtml;
         document.getElementById('modalFooter').innerHTML = footerHtml;
+        const modal = document.getElementById('modal');
+        modal.scrollTop = 0;
         document.getElementById('modalOverlay').classList.add('open');
         // Focus trap light
         setTimeout(() => {
           const first = document.querySelector('#modalFooter .btn, #modalBody input, #modalBody button');
           if (first) first.focus();
+          // Focusing the footer button can otherwise scroll a long modal to its end.
+          document.getElementById('modal').scrollTop = 0;
         }, 100);
       });
     }
@@ -2650,8 +2682,107 @@ function rCard(rank, suit, joker=false) {
           </table>
         </div>
         <button class="btn btn-secondary download-points-table-btn" data-download-points-table title="Download Points Table" aria-label="Download Points Table">⬇️</button>
-        <p class="points-table-note">Winner of each round is shown as W · — means no score recorded for that round</p>
       `;
+    }
+
+    // ----- TOURNAMENT-WIDE REVIEW (INSANE REVIEW ENGINE) -----
+    function renderTournamentReview(t) {
+      const players = [...(t.players || [])].sort((a, b) => (a.rank || 999) - (b.rank || 999));
+      const rounds = t.rounds || [];
+      const roundCount = rounds.length;
+      const scoreRows = [];
+      rounds.forEach((round, index) => {
+        Object.entries(round.scores || {}).forEach(([pid, rawScore]) => {
+          const player = players.find(p => p.id === pid);
+          const score = Number(rawScore);
+          if (player && Number.isFinite(score)) scoreRows.push({ pid, name: player.name, score, round: Number(round.roundNumber) || index + 1 });
+        });
+      });
+
+      // Stable tournament-specific selection: refreshes do not reshuffle the report,
+      // while different tournaments and different score patterns produce different prose.
+      const hashText = value => { let h = 2166136261; for (let i = 0; i < String(value).length; i++) { h ^= String(value).charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+      const pick = (list, key) => list[hashText(`${t.id || t.name}|${key}|${roundCount}|${scoreRows.map(x => x.pid + ':' + x.score).join(',')}`) % list.length];
+      const openers = {
+        champion: ['{name} finishes the tournament at the summit.', '{name} claims the title after coming through the full tournament schedule.', '{name} sets the benchmark and ends the event as champion.', '{name} converts the overall score position into the tournament title.', '{name} emerges as the tournament’s leading performer.', 'The final standings place {name} at the top of the field.'],
+        runner: ['{name} secures second place in the final standings.', '{name} completes the tournament as runner-up.', '{name} remains the closest challenger to the eventual champion.', '{name} finishes just short of the title in a second-place campaign.', '{name} earns the runner-up position across the recorded rounds.', 'Second place goes to {name} after the final score calculation.'],
+        strong: ['{name} records a top-three finish.', '{name} ends the tournament among its leading performers.', '{name} produces a strong overall placing in the final table.', '{name} stays within the leading group through the tournament.', '{name} secures a prominent position in the final standings.', '{name} finishes the event with a top-tier overall result.'],
+        improving: ['{name} closes the tournament on a stronger scoring note.', '{name} makes the clearest end-to-end reduction in penalty points.', '{name} shows the strongest first-to-final-round score improvement.', '{name} finishes with a lower penalty total in the final round than at the start.', '{name} gives the closing stages a positive direction.', '{name} records a measurable improvement across the tournament timeline.'],
+        consistent: ['{name} produces one of the steadiest scoring patterns in the field.', '{name} keeps the round-to-round scores within a relatively narrow band.', '{name} stands out for consistency across the recorded rounds.', '{name} avoids large scoring swings more effectively than the other participants.', '{name} delivers a measured and stable sequence of round scores.', '{name} maintains the tightest scoring range among eligible players.'],
+        volatile: ['{name} experiences the widest swings between recorded round scores.', '{name}’s tournament contains some of the sharpest score fluctuations.', '{name} sees a varied campaign, with notable differences between rounds.', '{name} records a less predictable scoring pattern across the event.', '{name}’s results move considerably from one round to another.', '{name} has a tournament defined by substantial round-to-round variation.'],
+        general: ['{name} completes the tournament in position {rank}.', '{name} finishes the event in the middle of the final standings.', '{name} records a {rankText} place finish in this tournament.', '{name}’s final position reflects the cumulative result of the recorded rounds.', '{name} completes the full tournament and places {rank} overall.', '{name} finishes with a defined place in the final score order.']
+      };
+      const insightTemplates = [
+        'Across {rounds} rounds, the player recorded {total} penalty points at an average of {average} per round.',
+        'The scorecard closes at {total} total points, with a round average of {average} across {rounds} recorded rounds.',
+        'The tournament record shows {total} cumulative points and a {average}-point average over {rounds} rounds.',
+        'Across the available results, {total} total points were recorded, averaging {average} per round.'
+      ];
+      const rankWords = ['champion', 'runner-up', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'];
+
+      const playerSummaries = players.map(player => {
+        const scores = rounds.map((round, index) => ({ round: Number(round.roundNumber) || index + 1, score: Object.prototype.hasOwnProperty.call(round.scores || {}, player.id) ? Number(round.scores[player.id]) : null })).filter(item => Number.isFinite(item.score));
+        const vals = scores.map(x => x.score);
+        const average = vals.length ? vals.reduce((sum, n) => sum + n, 0) / vals.length : null;
+        const spread = vals.length > 1 ? Math.max(...vals) - Math.min(...vals) : null;
+        const first = vals[0], last = vals[vals.length - 1];
+        const improvement = vals.length > 1 ? first - last : 0;
+        let archetype = 'general';
+        if (player.rank === 1 && t.winnerId === player.id) archetype = 'champion';
+        else if (player.rank === 2) archetype = 'runner';
+        else if (player.rank <= 3) archetype = 'strong';
+        else if (improvement >= 10) archetype = 'improving';
+        else if (spread !== null && spread <= 15) archetype = 'consistent';
+        else if (spread !== null && spread >= 40) archetype = 'volatile';
+        const rankText = rankWords[(player.rank || 1) - 1] || `position ${player.rank || '—'}`;
+        const opener = pick(openers[archetype], `${player.id}|opening`).replaceAll('{name}', String(player.name)).replaceAll('{rank}', player.rank || '—').replaceAll('{rankText}', rankText);
+        const insight = pick(insightTemplates, `${player.id}|insight`).replace('{rounds}', scores.length).replace('{total}', player.totalScore ?? 0).replace('{average}', average === null ? '—' : average.toFixed(1));
+        let trend = '';
+        if (scores.length >= 2) {
+          if (improvement > 0) trend = ` The final round was ${improvement} points lower than the opening round.`;
+          else if (improvement < 0) trend = ` The final round was ${Math.abs(improvement)} points higher than the opening round.`;
+          else trend = ' The opening and final round scores were level.';
+        }
+        const wins = Number(player.wins || 0);
+        const winNote = wins ? ` The player also recorded ${wins} round ${wins === 1 ? 'win' : 'wins'}.` : '';
+        const narrative = `${opener} ${insight}${trend}${winNote}`;
+        const stats = `${player.totalScore ?? 0} total points · ${average === null ? 'No average' : `${average.toFixed(1)} average`} · ${scores.length}/${roundCount} rounds scored · ${wins} ${wins === 1 ? 'win' : 'wins'}`;
+        let description = narrative;
+        if (player.eliminated) description += ` Eliminated in Round ${player.eliminationRound || '—'}.`;
+        return { player, description, stats, scores, spread };
+      });
+
+      const consistent = playerSummaries.filter(x => x.scores.length >= 2).sort((a, b) => a.spread - b.spread || (a.player.totalScore || 0) - (b.player.totalScore || 0))[0];
+      const improvements = playerSummaries.filter(x => x.scores.length >= 2).map(x => ({ ...x, improvement: x.scores[0].score - x.scores[x.scores.length - 1].score })).filter(x => x.improvement > 0).sort((a, b) => b.improvement - a.improvement)[0];
+      let comeback = null;
+      playerSummaries.forEach(x => { for (let i = 1; i < x.scores.length; i++) { const gain = x.scores[i - 1].score - x.scores[i].score; if (gain > 0 && (!comeback || gain > comeback.gain)) comeback = { ...x, gain, to: x.scores[i] }; } });
+      const highestPenalty = scoreRows.sort((a, b) => b.score - a.score)[0] || null;
+      const runnerUp = players.find(p => p.rank === 2) || null;
+      const highlight = (label, value) => `<div class="tournament-highlight"><span class="tournament-highlight-label">${label}</span><span class="tournament-highlight-value">${value}</span></div>`;
+      const playerHtml = playerSummaries.map(({ player, description, stats }) => `
+        <div class="tournament-review-player">
+          <div class="tournament-review-rank">${player.rank || '—'}</div>
+          <div><div class="tournament-review-player-name">${escapeHtml(player.name)}</div>
+            <div class="tournament-review-player-copy">${escapeHtml(description)}<br><span>${escapeHtml(stats)}</span></div>
+          </div>
+        </div>`).join('');
+      const highlightsHtml = [
+        highlight('Most Consistent Performer', consistent ? escapeHtml(consistent.player.name) : '—'),
+        highlight('Biggest Improvement', improvements ? escapeHtml(improvements.player.name) : '—'),
+        highlight('Best Comeback', comeback ? escapeHtml(comeback.player.name) : '—'),
+        highlight('Highest Penalty Round', highestPenalty ? escapeHtml(highestPenalty.name) : '—'),
+        highlight('Runner-up', runnerUp ? escapeHtml(runnerUp.name) : (players.length === 1 ? 'No runner-up' : 'No separate runner-up'))
+      ].join('');
+
+      return `
+        <details class="tournament-review-details">
+          <summary class="tournament-review-summary"><span><span class="tournament-review-kicker">INSANE REVIEW ENGINE · V1.0</span><span class="tournament-review-title">Tournament Completion Review</span><span class="tournament-review-credit">${roundCount} rounds · ${players.length} participants · Individual performance analysis</span></span><span class="tournament-review-toggle" aria-hidden="true">⌄</span></summary>
+          <section class="tournament-review-box" aria-label="Tournament completion review">
+            <div class="tournament-review-head"><div><div class="tournament-review-kicker">FULL TOURNAMENT REPORT</div><h3 class="tournament-review-title">Player-by-player assessment</h3></div><span aria-hidden="true" style="font-size:1.35rem">✦</span></div>
+            <div>${playerHtml}</div>
+            <div class="tournament-highlights"><div class="tournament-highlights-title">Tournament Highlights</div>${highlightsHtml}</div>
+          </section>
+        </details>`;
     }
 
     // ----- PLAY (ROUND ENTRY) -----
@@ -2686,7 +2817,7 @@ function rCard(rank, suit, joker=false) {
       // Live points table (always visible)
       const standingsTable = renderPointsTable(t);
 
-      // After final round: show champion declaration under the table (stay on this page so scores can still be edited)
+      // Completed tournament layout: final points table first, champion declaration second, expandable review last.
       if (isCompleted) {
         let championHtml = '';
         if (winner) {
@@ -2729,6 +2860,8 @@ function rCard(rank, suit, joker=false) {
           ${standingsTable}
 
           ${championHtml}
+
+          ${renderTournamentReview(t)}
 
           <div class="action-bar">
             ${t.rounds.length > 0 ? `<button class="btn btn-secondary btn-sm" id="undoRoundBtn">Undo Last Round</button>` : ''}
@@ -2897,11 +3030,14 @@ function rCard(rank, suit, joker=false) {
         const winner = t.players.find(p => p.id === winnerId);
         const roundNum = t.rounds.length;
 
-        // Check completion — stay on this page and show champion under the points table
+        // Check completion — stay on this page; completed view begins with the final points table.
         if (t.status === 'completed') {
           archiveTournament();
           toast(`Tournament complete! ${winner ? 'Champion: ' + winner.name : 'Tied'}`);
           render();
+          // A completed tournament should open at the champion declaration, never at the old form scroll position.
+          window.scrollTo(0, 0);
+          requestAnimationFrame(() => window.scrollTo(0, 0));
           return;
         }
 
@@ -3115,6 +3251,11 @@ function rCard(rank, suit, joker=false) {
             <div class="review-banner-title">PLAYER PERFORMANCE REVIEWS</div>
             <p class="review-banner-instructions">Tap a round to expand it, then tap any player's name to reveal their individual performance review.</p>
             <div class="review-engine-credit">Powered by INSANE REVIEW ENGINE v.1.0</div>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end">
+              <button type="button" class="btn btn-ghost btn-sm" id="reviewEngineLearnMore" aria-label="Learn more about INSANE REVIEW ENGINE">
+                <span aria-hidden="true">ⓘ</span> Learn More
+              </button>
+            </div>
           </div>
         </div>
         ${t.rounds.map((r, idx) => {
@@ -3152,6 +3293,102 @@ function rCard(rank, suit, joker=false) {
     }
 
     function bindRounds() {
+      document.getElementById('reviewEngineLearnMore')?.addEventListener('click', () => {
+        const learnMoreHtml = `
+          <div style="position:relative;overflow:hidden;padding:20px;border:1px solid var(--border);border-left:4px solid var(--red-bright);border-radius:14px;background:linear-gradient(135deg,var(--red-soft),var(--card) 72%);margin-bottom:20px">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+              <span style="font-size:.66rem;font-weight:900;letter-spacing:.15em;color:var(--red-bright)">INSANE RUMMY TRACKER</span>
+              <span style="font-size:.65rem;font-weight:800;letter-spacing:.08em;padding:5px 8px;border:1px solid var(--border);border-radius:99px;color:var(--text-muted)">ENGINE RELEASE · V1.0</span>
+            </div>
+            <h2 style="font-size:1.55rem;line-height:1.12;margin:15px 0 7px;font-weight:950;letter-spacing:-.035em">INSANE REVIEW ENGINE</h2>
+            <div style="font-size:1rem;font-weight:850;color:var(--red-bright);letter-spacing:.01em">Every Round Has a Story.</div>
+            <p style="margin:12px 0 0;color:var(--text-muted);font-size:.88rem;line-height:1.7">A structured, score-driven review system that transforms tournament results into concise, player-specific performance commentary.</p>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:17px">
+              <div style="padding:11px;border:1px solid var(--border);border-radius:10px;background:var(--card)">
+                <div style="font-size:1.35rem;font-weight:950;line-height:1.1">10</div><div style="font-size:.68rem;color:var(--text-muted);margin-top:4px">Performance categories</div>
+              </div>
+              <div style="padding:11px;border:1px solid var(--border);border-radius:10px;background:var(--card)">
+                <div style="font-size:1.35rem;font-weight:950;line-height:1.1">600</div><div style="font-size:.68rem;color:var(--text-muted);margin-top:4px">Pre-written variations</div>
+              </div>
+            </div>
+          </div>
+
+          <section style="margin:0 0 20px">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">01 / SYSTEM OVERVIEW</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 8px">What is the Review Engine?</h3>
+            <p style="margin:0;color:var(--text-muted);line-height:1.75;font-size:.86rem">INSANE REVIEW ENGINE is an integrated, rule-based commentary module within INSANE RUMMY TRACKER. It interprets recorded round outcomes using score, finishing position and available previous-round data, then assigns a performance category and selects a corresponding written review.</p>
+            <p style="margin:8px 0 0;color:var(--text-muted);line-height:1.75;font-size:.86rem">Its purpose is to add a readable layer of context to the tournament record—not to replace the underlying scores, rankings or results.</p>
+          </section>
+
+          <section style="margin:0 0 20px;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">02 / REVIEW WORKFLOW</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 12px">How the system processes a round</h3>
+            <div style="display:grid;gap:12px">
+              ${[
+                ['01','Result ingestion','Reads the recorded scores and round outcome from the active tournament.'],
+                ['02','Comparative evaluation','Orders players by penalty score and checks previous-round scores where available.'],
+                ['03','Category assignment','Applies the engine’s programmed rules to identify a suitable review category.'],
+                ['04','Variation selection','Selects a corresponding text variation from the built-in review library.'],
+                ['05','Review presentation','Displays the selected commentary within the relevant round and player record.']
+              ].map(([n,title,desc])=>`<div style="display:flex;gap:11px;align-items:flex-start"><div style="flex:0 0 28px;width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:var(--red-soft);color:var(--red-bright);font-size:.7rem;font-weight:950">${n}</div><div><div style="font-size:.83rem;font-weight:850">${title}</div><div style="font-size:.76rem;color:var(--text-muted);line-height:1.55;margin-top:2px">${desc}</div></div></div>`).join('')}
+            </div>
+          </section>
+
+          <section style="margin:0 0 20px">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">03 / CLASSIFICATION MODEL</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 7px">Ten performance categories</h3>
+            <p style="margin:0 0 11px;color:var(--text-muted);font-size:.82rem;line-height:1.65">The v1.0 review library is organised into ten categories. Each represents a score-based outcome or comparison.</p>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+              ${[
+                ['Victory','First-place result'],['Runner','Second-place result'],['Strong','Strong finishing position'],['Middle','Mid-table result'],['Consistent','Score close to the previous round'],['Improved','Lower penalty score than the previous round'],['Declined','Higher penalty score than the previous round'],['Comeback','Improvement of at least 15 points'],['Highest','Highest penalty score in the round'],['Poor','Weak finishing position']
+              ].map(([name,desc])=>`<div style="padding:10px 11px;border:1px solid var(--border);border-radius:9px;background:var(--bg)"><div style="font-size:.8rem;font-weight:900">${name}</div><div style="font-size:.71rem;color:var(--text-muted);line-height:1.45;margin-top:4px">${desc}</div></div>`).join('')}
+            </div>
+          </section>
+
+          <section style="margin:0 0 20px;padding:15px;border:1px solid var(--border);border-radius:12px;background:linear-gradient(145deg,var(--bg),var(--card))">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">04 / CONTENT LIBRARY</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 8px">A library of 600 review variations</h3>
+            <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 10px"><span style="font-size:2rem;font-weight:950;letter-spacing:-.04em">10 × 60</span><span style="font-size:.85rem;color:var(--text-muted)">= 600 variations</span></div>
+            <div style="height:7px;border-radius:99px;background:var(--border);overflow:hidden;display:flex;margin-bottom:10px"><span style="width:100%;background:var(--red-bright)"></span></div>
+            <p style="margin:0;color:var(--text-muted);font-size:.83rem;line-height:1.7">Each category contains a set of pre-written alternatives. The engine selects from this library so similar outcomes can be described with varied wording, without relying on a live generative-AI service.</p>
+          </section>
+
+          <section style="margin:0 0 20px">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">05 / SELECTION & CONSISTENCY</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 7px">Designed to minimise repetition</h3>
+            <p style="margin:0;color:var(--text-muted);font-size:.85rem;line-height:1.7">The selection logic uses deterministic variation selection and repetition checks. It seeks to avoid duplicate wording among players in the same round and reduce reuse from a player’s recent review history, subject to the availability of alternative text.</p>
+            <div style="margin-top:10px;padding:11px 12px;border-left:3px solid var(--red-bright);background:var(--red-soft);border-radius:0 9px 9px 0;font-size:.78rem;line-height:1.6;color:var(--text-muted)">Variation improves the reading experience; it does not change the player's score, rank or recorded tournament result.</div>
+          </section>
+
+          <section style="margin:0 0 20px">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">06 / DEPLOYMENT & ACCESSIBILITY</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 8px">Self-contained and offline-capable</h3>
+            <div style="display:grid;gap:8px">
+              ${[
+                ['Local execution','Review selection runs within the tracker itself.'],
+                ['No external AI dependency','The v1.0 review library does not require a third-party AI API.'],
+                ['Offline review generation','The review logic and text library are bundled with the application.'],
+                ['Integrated tournament context','Reviews use results already recorded in the active tournament.']
+              ].map(([a,b])=>`<div style="display:flex;gap:9px;align-items:flex-start"><span style="color:var(--red-bright);font-weight:950">✓</span><div><div style="font-size:.81rem;font-weight:850">${a}</div><div style="font-size:.75rem;color:var(--text-muted);line-height:1.5;margin-top:2px">${b}</div></div></div>`).join('')}
+            </div>
+          </section>
+
+          <section style="margin:0 0 16px">
+            <div style="font-size:.66rem;font-weight:900;letter-spacing:.13em;color:var(--red-bright);margin-bottom:6px">07 / SCOPE & METHODOLOGY</div>
+            <h3 style="font-size:1.05rem;font-weight:900;margin:0 0 7px">What the reviews do—and do not—measure</h3>
+            <p style="margin:0;color:var(--text-muted);font-size:.82rem;line-height:1.7">The engine evaluates recorded outcomes and score patterns. It does not observe cards, player decisions, tactics, intent or behaviour during a game. Terms such as improvement and consistency refer to score comparisons, not a verified assessment of playing skill.</p>
+          </section>
+
+          <div style="padding:17px;border-radius:12px;background:linear-gradient(135deg,var(--red-soft),var(--card));border:1px solid var(--red);text-align:center">
+            <div style="font-size:.65rem;font-weight:900;letter-spacing:.16em;color:var(--red-bright)">INSANE REVIEW ENGINE · V1.0</div>
+            <div style="font-size:1.13rem;font-weight:950;letter-spacing:-.02em;margin-top:8px">More Than Just Scores.</div>
+            <div style="font-size:.84rem;font-weight:800;margin-top:4px">Every Player. Every Round. Every Story.</div>
+            <div style="font-size:.68rem;color:var(--text-muted);margin-top:10px">A performance-review feature of INSANE RUMMY TRACKER</div>
+          </div>
+          <p style="font-size:.68rem;color:var(--text-muted);line-height:1.55;margin:13px 0 0">Feature note: The descriptions above document the implemented v1.0 functionality. Review commentary is generated from the tournament data available to the application.</p>
+        `;
+        openModal('About INSANE REVIEW ENGINE', learnMoreHtml, '<button class="btn btn-primary" data-action="cancel">Got It</button>');
+      });
       document.querySelectorAll('.player-review-toggle').forEach(button => {
         button.addEventListener('click', e => {
           e.stopPropagation();
